@@ -47,10 +47,9 @@ class BadmintonBooking:
             if result.get("actionState") == 0 and "data" in result:
                 self.token = result["data"].get("token")
                 self.user_id = result["data"].get("userId")
-                # 设置后续请求的token
-                self.session.headers.update({"token": self.token})
-                print(f"登录成功，token: {self.token}")
-            
+                # 设置后续请求的token，使用大写的Token
+                self.session.headers.update({"Token": self.token})
+
             print(f"登录结果: {result}")
             return result
         except Exception as e:
@@ -61,18 +60,21 @@ class BadmintonBooking:
         """
         步骤3: 获取指定日期的可预约场地
         """
-        url = f"{self.base_url}/open/getSpaceOrderDetailsNew"
-        params = {
-            "spaceId": space_id,
-            "sportType": sport_type,
-            "time": date
-        }
-        
+        # 参数直接放在URL中，就像Postman的curl命令一样
+        url = f"{self.base_url}/open/getSpaceOrderDetailsNew?spaceId={space_id}&sportType={sport_type}&time={date}"
+
         try:
-            response = self.session.get(url, params=params)
-            result = response.json()
-            print(f"可预约场地: {result}")
-            return result
+            # 使用POST请求，直接使用session的headers
+            response = self.session.post(url)
+            
+            if response.status_code == 200:
+                result = response.json()
+                print(f"可预约场地: {result}")
+                return result
+            else:
+                print(f"响应内容: {response.text}")
+                return {"error": f"HTTP {response.status_code}: {response.text}"}
+                
         except Exception as e:
             print(f"获取场地信息失败: {e}")
             return {"error": str(e)}
@@ -89,8 +91,7 @@ class BadmintonBooking:
             
             if result.get("actionState") == 1 and "data" in result:
                 self.phone_str = result["data"].get("phonestr")
-                print(f"获取用户信息成功，phonestr: {self.phone_str}")
-            
+
             print(f"用户认证信息: {result}")
             return result
         except Exception as e:
@@ -134,46 +135,39 @@ class BadmintonBooking:
         
         for court_id, court_info in open_slice.items():
             if (court_info.get("slice_name") == court_name and 
-                court_info.get("slice_time") == time_slot):
+                court_info.get("slice_time") == time_slot and
+                court_info.get("is_lock") == 0):
                 return court_id
         
         return None
     
-    def complete_booking_process(self, phone: str, sms_code: str, date: str, 
+    def complete_booking_process(self, phone: str, sms_code: str, date: str,
                                 court_name: str, time_slot: str) -> Dict[str, Any]:
         """
         完整的预约流程
         """
-        print("=== 开始羽毛球场地预约流程 ===")
-        
-        # 步骤1: 发送验证码
-        print("\n步骤1: 发送验证码")
-        sms_result = self.send_sms_code(phone)
-        if "error" in sms_result:
-            return sms_result
-        
         # 步骤2: 登录
         print("\n步骤2: 登录")
         login_result = self.login_with_sms(phone, sms_code)
         if "error" in login_result or not self.token:
             return login_result
-        
-        # 步骤3: 获取可预约场地
-        print("\n步骤3: 获取可预约场地")
+
+        # 步骤3: 获取用户认证信息
+        print("\n步骤3: 获取用户认证信息")
+        user_info_result = self.get_user_verified_info()
+        if "error" in user_info_result or not self.phone_str:
+            return user_info_result
+
+        # 步骤4: 获取可预约场地
+        print("\n步骤4: 获取可预约场地")
         courts_result = self.get_available_courts(date)
         if "error" in courts_result:
             return courts_result
         
-        # 步骤4: 获取用户认证信息
-        print("\n步骤4: 获取用户认证信息")
-        user_info_result = self.get_user_verified_info()
-        if "error" in user_info_result or not self.phone_str:
-            return user_info_result
-        
         # 查找指定的场地ID
         court_id = self.find_court_by_name_and_time(courts_result, court_name, time_slot)
         if not court_id:
-            return {"error": f"未找到场地 {court_name} 在时间段 {time_slot} 的预约信息"}
+            return {"error": f"未找到场地：{court_name}，在时间段：{time_slot} 的预约信息"}
         
         print(f"\n找到场地ID: {court_id}")
         
@@ -207,12 +201,24 @@ def main():
     
     # 配置参数
     phone = "18273475755"  # 手机号
-    sms_code = input("请输入收到的验证码: ")  # 验证码需要用户输入
-    date = "2025-08-13"  # 预约日期
+    date = "2025-08-20"  # 预约日期
     court_name = "羽毛球5"  # 场地名称
-    time_slot = "12:30--14:30"  # 时间段
+    time_slot = "18:30--20:30"  # 时间段
     
-    # 执行完整预约流程
+    print("=== 开始湘湖小学羽毛球场地预约流程 ===")
+    
+    # 步骤1: 发送验证码
+    print("\n步骤1: 发送验证码")
+    sms_result = booking.send_sms_code(phone)
+    if "error" in sms_result:
+        print(f"发送验证码失败: {sms_result['error']}")
+        return
+    
+    # 等待用户输入验证码
+    print("\n")
+    sms_code = input("请输入收到的验证码: ")
+    
+    # 执行剩余的预约流程
     result = booking.complete_booking_process(
         phone=phone,
         sms_code=sms_code,
@@ -228,7 +234,7 @@ def main():
         print(f"\n预约成功！请使用以下链接进行支付：")
         print(result["payment_url"])
     else:
-        print("\n预约失败，请检查错误信息")
+        print("\n预约失败,请重新预约")
 
 if __name__ == "__main__":
     main()
