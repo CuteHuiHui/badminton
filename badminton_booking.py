@@ -1,7 +1,12 @@
 import requests
 import json
 import time
-from typing import Dict, Any, Optional
+from datetime import datetime, timedelta
+from typing import Dict, Any, Optional, List
+import qrcode
+from PIL import Image
+import io
+import os
 
 class BadmintonBooking:
     def __init__(self):
@@ -98,7 +103,7 @@ class BadmintonBooking:
             print(f"获取用户信息失败: {e}")
             return {"error": str(e)}
     
-    def create_order(self, court_id: str, so_open_id: str = "1000187088") -> Dict[str, Any]:
+    def create_order(self, court_id: str) -> Dict[str, Any]:
         """
         步骤5: 创建预约订单
         """
@@ -109,10 +114,9 @@ class BadmintonBooking:
             "orderType": 1,
             "userId": self.user_id,
             "orderUser": 1,
-            "soOpenid": so_open_id,
-            "openid": court_id,
+            "soOpenid": court_id,
             "phones": [self.phone_str],
-            "fullPath": f"http://kfxy.ruizhiedu.com/#/pages/space/orderBatch?openid={so_open_id}"
+            "fullPath": f"http://kfxy.ruizhiedu.com/#/pages/space/orderBatch?openid={court_id}"
         }
         
         try:
@@ -124,39 +128,49 @@ class BadmintonBooking:
             print(f"创建订单失败: {e}")
             return {"error": str(e)}
     
-    def find_court_by_name_and_time(self, courts_data: Dict[str, Any], court_name: str, time_slot: str) -> Optional[str]:
+    def find_available_courts_by_time(self, courts_data: Dict[str, Any], time_slot: str) -> List[Dict[str, str]]:
         """
-        根据场地名称和时间段查找对应的court_id
+        根据时间段查找所有可用场地，按场地名称倒序排列
         """
         if "data" not in courts_data or "openSlice" not in courts_data["data"]:
-            return None
+            return []
             
         open_slice = courts_data["data"]["openSlice"]
+        available_courts = []
         
         for court_id, court_info in open_slice.items():
-            if (court_info.get("slice_name") == court_name and 
-                court_info.get("slice_time") == time_slot and
-                court_info.get("is_lock") == 0):
-                return court_id
+            if (court_info.get("slice_time") == time_slot and
+                court_info.get("is_lock") != 1):
+                available_courts.append({
+                    "court_id": court_id,
+                    "court_name": court_info.get("slice_name", "")
+                })
         
-        return None
-    
-    def complete_booking_process(self, phone: str, sms_code: str, date: str,
-                                court_name: str, time_slot: str) -> Dict[str, Any]:
+        # 按场地名称倒序排列
+        available_courts.sort(key=lambda x: x["court_name"], reverse=True)
+        return available_courts
+
+    def complete_booking_process(self, phone: str, sms_code: str, date: str, time_slot: str) -> Dict[str, Any]:
         """
         完整的预约流程
         """
         # 步骤2: 登录
-        print("\n步骤2: 登录")
-        login_result = self.login_with_sms(phone, sms_code)
-        if "error" in login_result or not self.token:
-            return login_result
+        # print("\n步骤2: 登录")
+        # login_result = self.login_with_sms(phone, sms_code)
+        # if "error" in login_result or not self.token:
+        #     return login_result
 
         # 步骤3: 获取用户认证信息
-        print("\n步骤3: 获取用户认证信息")
-        user_info_result = self.get_user_verified_info()
-        if "error" in user_info_result or not self.phone_str:
-            return user_info_result
+        # print("\n步骤3: 获取用户认证信息")
+        # user_info_result = self.get_user_verified_info()
+        # if "error" in user_info_result or not self.phone_str:
+        #     return user_info_result
+
+        self.phone_str = "gXHpHhTYiIG+LTKdooiLlA=="
+        self.user_id = "zuKNugG0CLVx"
+        # 设置后续请求的token，使用大写的Token
+        self.session.headers.update({"Token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ6dUtOdWdHMENMVngiLCJ1c2VySWQiOiJ6dUtOdWdHMENMVngiLCJpYXQiOjE3NTUwNDkwNjV9.feRIBeHZA5RXne4DpxLusCK60zao2-EYAl-uJXgc_90"})
+
 
         # 步骤4: 获取可预约场地
         print("\n步骤4: 获取可预约场地")
@@ -164,35 +178,79 @@ class BadmintonBooking:
         if "error" in courts_result:
             return courts_result
         
-        # 查找指定的场地ID
-        court_id = self.find_court_by_name_and_time(courts_result, court_name, time_slot)
-        if not court_id:
-            return {"error": f"未找到场地：{court_name}，在时间段：{time_slot} 的预约信息"}
+        # 查找符合时间段的所有可用场地，按名称倒序
+        available_courts = self.find_available_courts_by_time(courts_result, time_slot)
+        if not available_courts:
+            return {"error": f"未找到时间段：{time_slot} 的可用场地"}
         
-        print(f"\n找到场地ID: {court_id}")
+        print(f"\n找到 {len(available_courts)} 个可用场地，按名称倒序：")
+        for court in available_courts:
+            print(f"  - {court['court_name']} (ID: {court['court_id']})")
         
-        # 步骤5: 创建订单
-        print("\n步骤5: 创建预约订单")
-        order_result = self.create_order(court_id)
-        if "error" in order_result:
-            return order_result
-        
-        # 步骤6: 获取支付二维码URL
-        if (order_result.get("actionState") == 1 and 
-            "data" in order_result and 
-            "codeUrl" in order_result["data"]):
+        # 轮询尝试预约，从名称倒序的第一个开始
+        for court in available_courts:
+            court_id = court["court_id"]
+            court_name = court["court_name"]
             
-            code_url = order_result["data"]["codeUrl"]
-            print(f"\n步骤6: 获取支付二维码URL: {code_url}")
+            print(f"\n尝试预约场地：{court_name} (ID: {court_id})")
             
-            return {
-                "success": True,
-                "message": "预约成功",
-                "payment_url": code_url,
-                "order_info": order_result["data"]
-            }
+            # 步骤5: 创建订单
+            print("\n步骤5: 创建预约订单")
+            order_result = self.create_order(court_id)
+            
+            if "error" not in order_result:
+                # 步骤6: 获取支付二维码URL
+                if (order_result.get("actionState") == 1 and 
+                    "data" in order_result and 
+                    "codeUrl" in order_result["data"]):
+                    
+                    code_url = order_result["data"]["codeUrl"]
+                    print(f"\n步骤6: 获取支付二维码URL: {code_url}")
+                    
+                    return {
+                        "success": True,
+                        "message": f"预约成功 - 场地：{court_name}",
+                        "court_name": court_name,
+                        "payment_url": code_url,
+                        "order_info": order_result["data"]
+                    }
+                else:
+                    print(f"场地 {court_name} 预约失败，尝试下一个场地")
+                    continue
+            else:
+                print(f"场地 {court_name} 预约失败：{order_result.get('error', '未知错误')}，尝试下一个场地")
+                continue
         
-        return order_result
+        return {"error": "所有可用场地预约都失败了"}
+
+    def generate_qr_code(self, payment_url: str, filename: str = "payment_qr.png") -> str:
+        """
+        生成支付二维码
+        """
+        try:
+            # 创建二维码实例
+            qr = qrcode.QRCode(
+                version=1,
+                error_correction=qrcode.constants.ERROR_CORRECT_L,
+                box_size=10,
+                border=4,
+            )
+            
+            # 添加数据
+            qr.add_data(payment_url)
+            qr.make(fit=True)
+            
+            # 创建二维码图片
+            img = qr.make_image(fill_color="black", back_color="white")
+            
+            # 保存图片
+            img.save(filename)
+            print(f"\n二维码已生成并保存为: {filename}")
+            
+            return filename
+        except Exception as e:
+            print(f"生成二维码失败: {e}")
+            return ""
 
 # 使用示例
 def main():
@@ -201,29 +259,31 @@ def main():
     
     # 配置参数
     phone = "18273475755"  # 手机号
-    date = "2025-08-20"  # 预约日期
-    court_name = "羽毛球5"  # 场地名称
-    time_slot = "18:30--20:30"  # 时间段
+    # 预约第二天
+    tomorrow = datetime.now() + timedelta(days=1)
+    date = tomorrow.strftime("%Y-%m-%d")
+    # time_slot = "16:30--18:30"  # 时间段
+    time_slot = "14:30--16:30"  # 时间段
+
+    print(f"=== 开始湘湖小学羽毛球场地预约流程 (预约日期: {date}) ===")
     
-    print("=== 开始湘湖小学羽毛球场地预约流程 ===")
+    # # 步骤1: 发送验证码
+    # print("\n步骤1: 发送验证码")
+    # sms_result = booking.send_sms_code(phone)
+    # if "error" in sms_result:
+    #     print(f"发送验证码失败: {sms_result['error']}")
+    #     return
     
-    # 步骤1: 发送验证码
-    print("\n步骤1: 发送验证码")
-    sms_result = booking.send_sms_code(phone)
-    if "error" in sms_result:
-        print(f"发送验证码失败: {sms_result['error']}")
-        return
-    
-    # 等待用户输入验证码
-    print("\n")
-    sms_code = input("请输入收到的验证码: ")
+    # # 等待用户输入验证码
+    # print("\n")
+    # sms_code = input("请输入收到的验证码: ")
     
     # 执行剩余的预约流程
     result = booking.complete_booking_process(
         phone=phone,
-        sms_code=sms_code,
+        # sms_code=sms_code,
+        sms_code="0000",
         date=date,
-        court_name=court_name,
         time_slot=time_slot
     )
     
@@ -231,8 +291,25 @@ def main():
     print(json.dumps(result, indent=2, ensure_ascii=False))
     
     if result.get("success"):
-        print(f"\n预约成功！请使用以下链接进行支付：")
+        print(f"\n预约成功！场地：{result.get('court_name')}")
+        print(f"请使用以下链接进行支付：")
         print(result["payment_url"])
+        
+        # 生成支付二维码
+        qr_filename = booking.generate_qr_code(result["payment_url"])
+        if qr_filename:
+            print(f"\n支付二维码已生成，请扫描 {qr_filename} 进行支付")
+            
+            # 可选：尝试打开二维码图片
+            try:
+                if os.name == 'nt':  # Windows
+                    os.startfile(qr_filename)
+                elif os.name == 'posix':  # macOS/Linux
+                    os.system(f'open {qr_filename}')  # macOS
+                    # os.system(f'xdg-open {qr_filename}')  # Linux
+                print("二维码图片已自动打开")
+            except:
+                print("请手动打开二维码图片文件")
     else:
         print("\n预约失败,请重新预约")
 
