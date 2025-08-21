@@ -7,6 +7,7 @@ import qrcode
 from PIL import Image
 import io
 import os
+import pytz
 
 class BadmintonBooking:
     def __init__(self):
@@ -154,23 +155,17 @@ class BadmintonBooking:
         """
         完整的预约流程
         """
-        # 步骤2: 登录
-        # print("\n步骤2: 登录")
-        # login_result = self.login_with_sms(phone, sms_code)
-        # if "error" in login_result or not self.token:
-        #     return login_result
+#         步骤2: 登录
+        print("\n步骤2: 登录")
+        login_result = self.login_with_sms(phone, sms_code)
+        if "error" in login_result or not self.token:
+            return login_result
 
-        # 步骤3: 获取用户认证信息
-        # print("\n步骤3: 获取用户认证信息")
-        # user_info_result = self.get_user_verified_info()
-        # if "error" in user_info_result or not self.phone_str:
-        #     return user_info_result
-
-        self.phone_str = "gXHpHhTYiIG+LTKdooiLlA=="
-        self.user_id = "zuKNugG0CLVx"
-        # 设置后续请求的token，使用大写的Token
-        self.session.headers.update({"Token": "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ6dUtOdWdHMENMVngiLCJ1c2VySWQiOiJ6dUtOdWdHMENMVngiLCJpYXQiOjE3NTUwNDkwNjV9.feRIBeHZA5RXne4DpxLusCK60zao2-EYAl-uJXgc_90"})
-
+#         步骤3: 获取用户认证信息
+        print("\n步骤3: 获取用户认证信息")
+        user_info_result = self.get_user_verified_info()
+        if "error" in user_info_result or not self.phone_str:
+            return user_info_result
 
         # 步骤4: 获取可预约场地
         print("\n步骤4: 获取可预约场地")
@@ -187,6 +182,10 @@ class BadmintonBooking:
         for court in available_courts:
             print(f"  - {court['court_name']} (ID: {court['court_id']})")
         
+            # 等待到北京时间上午10:00整
+        print("\n⏰ 等待北京时间上午10:00整开始抢票...")
+        self.wait_until_10am_beijing()
+        
         # 轮询尝试预约，从名称倒序的第一个开始
         for court in available_courts:
             court_id = court["court_id"]
@@ -200,8 +199,8 @@ class BadmintonBooking:
             
             if "error" not in order_result:
                 # 步骤6: 获取支付二维码URL
-                if (order_result.get("actionState") == 1 and 
-                    "data" in order_result and 
+                if (order_result.get("actionState") == 1 and
+                    "data" in order_result and
                     "codeUrl" in order_result["data"]):
                     
                     code_url = order_result["data"]["codeUrl"]
@@ -241,7 +240,7 @@ class BadmintonBooking:
             qr.make(fit=True)
             
             # 创建二维码图片
-            img = qr.make_image(fill_color="black", back_color="white")
+            img = qrcode.make_image(payment_url)
             
             # 保存图片
             img.save(filename)
@@ -251,6 +250,44 @@ class BadmintonBooking:
         except Exception as e:
             print(f"生成二维码失败: {e}")
             return ""
+
+    def wait_until_10am_beijing(self):
+        """
+        等待到北京时间当天上午10:00整
+        """
+        # 设置北京时区
+        beijing_tz = pytz.timezone('Asia/Shanghai')
+        
+        while True:
+            # 获取当前北京时间
+            now_beijing = datetime.now(beijing_tz)
+            
+            # 计算今天上午10:00的时间
+            target_time = now_beijing.replace(hour=14, minute=35, second=0, microsecond=0)
+            
+            # 如果已经过了今天的10:00，则设置为明天的10:00
+            if now_beijing >= target_time:
+                target_time = target_time + timedelta(days=1)
+            
+            # 计算剩余时间
+            time_diff = target_time - now_beijing
+            total_seconds = int(time_diff.total_seconds())
+            
+            if total_seconds <= 0:
+                print("\n🎯 北京时间10:00整，开始创建订单！")
+                break
+            
+            # 格式化倒计时显示
+            hours = total_seconds // 3600
+            minutes = (total_seconds % 3600) // 60
+            seconds = total_seconds % 60
+            
+            print(f"\r⏰ 距离北京时间10:00还有: {hours:02d}:{minutes:02d}:{seconds:02d} ", end="", flush=True)
+            
+            # 每秒更新一次
+            time.sleep(1)
+        
+        print()  # 换行
 
 # 使用示例
 def main():
@@ -262,27 +299,25 @@ def main():
     # 预约第二天
     tomorrow = datetime.now() + timedelta(days=1)
     date = tomorrow.strftime("%Y-%m-%d")
-    # time_slot = "16:30--18:30"  # 时间段
-    time_slot = "14:30--16:30"  # 时间段
+    time_slot = "16:30--18:30"  # 时间段
 
     print(f"=== 开始湘湖小学羽毛球场地预约流程 (预约日期: {date}) ===")
     
-    # # 步骤1: 发送验证码
-    # print("\n步骤1: 发送验证码")
-    # sms_result = booking.send_sms_code(phone)
-    # if "error" in sms_result:
-    #     print(f"发送验证码失败: {sms_result['error']}")
-    #     return
+    # 步骤1: 发送验证码
+    print("\n步骤1: 发送验证码")
+    sms_result = booking.send_sms_code(phone)
+    if "error" in sms_result:
+        print(f"发送验证码失败: {sms_result['error']}")
+        return
     
-    # # 等待用户输入验证码
-    # print("\n")
-    # sms_code = input("请输入收到的验证码: ")
+    # 等待用户输入验证码
+    print("\n")
+    sms_code = input("请输入收到的验证码: ")
     
     # 执行剩余的预约流程
     result = booking.complete_booking_process(
         phone=phone,
-        # sms_code=sms_code,
-        sms_code="0000",
+        sms_code=sms_code,
         date=date,
         time_slot=time_slot
     )
