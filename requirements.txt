@@ -1,0 +1,16 @@
+altgraph==0.17.4
+certifi==2025.8.3
+charset-normalizer==3.4.3
+colorama==0.4.6
+idna==3.10
+packaging==25.0
+pefile==2023.2.7
+pillow==11.3.0
+pyinstaller==6.15.0
+pyinstaller-hooks-contrib==2025.8
+pytz==2025.2
+pywin32-ctypes==0.2.3
+qrcode==8.2
+requests==2.32.4
+setuptools==80.9.0
+urllib3==2.5.0
